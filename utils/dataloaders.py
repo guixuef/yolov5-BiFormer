@@ -127,7 +127,7 @@ def create_dataloader(path,
             batch_size,
             augment=augment,  # augmentation
             hyp=hyp,  # hyperparameters
-            rect=rect,  # rectangular batches
+            rect=rect,  # rectangular batches#矩形策略，是否用矩形训练
             cache_images=cache,
             single_cls=single_cls,
             stride=int(stride),
@@ -456,13 +456,15 @@ class LoadImagesAndLabels(Dataset):
         self.image_weights = image_weights
         self.rect = False if image_weights else rect
         self.mosaic = self.augment and not self.rect  # load 4 images at a time into a mosaic (only during training)
+        #img_size // 2   320
+        #img_size / 2    320.0
         self.mosaic_border = [-img_size // 2, -img_size // 2]
-        self.stride = stride
+        self.stride = stride#下采样总数
         self.path = path
         self.albumentations = Albumentations(size=img_size) if augment else None
 
         try:
-            f = []  # image files
+            f = []  # image files#
             for p in path if isinstance(path, list) else [path]:
                 p = Path(p)  # os-agnostic
                 if p.is_dir():  # dir
@@ -482,10 +484,12 @@ class LoadImagesAndLabels(Dataset):
         except Exception as e:
             raise Exception(f'{prefix}Error loading data from {path}: {e}\n{HELP_URL}') from e
 
-        # Check cache
+        # Check cache#把train的图片路径拼装成lable的txt路径
         self.label_files = img2label_paths(self.im_files)  # labels
+        #缓存路径，装的是lable的数据
         cache_path = (p if p.is_file() else Path(self.label_files[0]).parent).with_suffix('.cache')
         try:
+            #cache lable的数据
             cache, exists = np.load(cache_path, allow_pickle=True).item(), True  # load dict
             assert cache['version'] == self.cache_version  # matches current version
             assert cache['hash'] == get_hash(self.label_files + self.im_files)  # identical hash
@@ -523,8 +527,10 @@ class LoadImagesAndLabels(Dataset):
 
         # Create indices
         n = len(self.shapes)  # number of images
-        bi = np.floor(np.arange(n) / batch_size).astype(int)  # batch index
-        nb = bi[-1] + 1  # number of batches
+        #np.floor返回不大于输入参数的最大整数。向下取整。
+        #np.arange(a,b,step) a起点，b终点，步长。默认0开始n结束步长1，返回数组
+        bi = np.floor(np.arange(n) / batch_size).astype(int)  # batch index bi[000111....]前3个是第一个batch
+        nb = bi[-1] + 1  # number of batches#一共多少个batch
         self.batch = bi  # batch index of image
         self.n = n
         self.indices = range(n)
@@ -676,7 +682,7 @@ class LoadImagesAndLabels(Dataset):
             labels = self.labels[index].copy()
             if labels.size:  # normalized xywh to pixel xyxy format
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], ratio[0] * w, ratio[1] * h, padw=pad[0], padh=pad[1])
-
+            #不用mosaic也需要做数据增强
             if self.augment:
                 img, labels = random_perspective(img,
                                                  labels,
@@ -688,6 +694,7 @@ class LoadImagesAndLabels(Dataset):
 
         nl = len(labels)  # number of labels
         if nl:
+            #mosaic后和数据增强后，lable需要归一化
             labels[:, 1:5] = xyxy2xywhn(labels[:, 1:5], w=img.shape[1], h=img.shape[0], clip=True, eps=1E-3)
 
         if self.augment:
@@ -698,7 +705,7 @@ class LoadImagesAndLabels(Dataset):
             # HSV color-space
             augment_hsv(img, hgain=hyp['hsv_h'], sgain=hyp['hsv_s'], vgain=hyp['hsv_v'])
 
-            # Flip up-down
+            # Flip up-down 更具一些随机值，来判断是否要做图形的变换
             if random.random() < hyp['flipud']:
                 img = np.flipud(img)
                 if nl:
@@ -719,7 +726,9 @@ class LoadImagesAndLabels(Dataset):
             labels_out[:, 1:] = torch.from_numpy(labels)
 
         # Convert
-        img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW, BGR to RGB
+        #pytorch是chanel first，所以用了openCV后需要转换数据的格式
+        img = img.transpose((2, 0, 1))[::-1]  # HWC to CHW  and  BGR to RGB
+        #将一个内存不连续存储的数组转换为内存连续存储的数组，使得运行速度更快。
         img = np.ascontiguousarray(img)
 
         return torch.from_numpy(img), labels_out, self.im_files[index], shapes
@@ -751,6 +760,7 @@ class LoadImagesAndLabels(Dataset):
         # YOLOv5 4-mosaic loader. Loads 1 image + 3 random images into a 4-image mosaic
         labels4, segments4 = [], []
         s = self.img_size
+        #随机指定中心点self.mosaic_border是imageSize//2得到的
         yc, xc = (int(random.uniform(-x, 2 * s + x)) for x in self.mosaic_border)  # mosaic center x, y
         indices = [index] + random.choices(self.indices, k=3)  # 3 additional image indices
         random.shuffle(indices)
@@ -760,8 +770,14 @@ class LoadImagesAndLabels(Dataset):
 
             # place img in img4
             if i == 0:  # top left
+                #img4是拼成的大图，并且赋一个先验值114
+                #xc yc 大图中心点
+                #x1a y1a 是图的左上角点
+                #x2a y2a 是图的右下角点，对于左上角的图而言，x2a, y2a = xc, yc
                 img4 = np.full((s * 2, s * 2, img.shape[2]), 114, dtype=np.uint8)  # base image with 4 tiles
+                #取max()是因为图片可能太大了，越界了，那么越界的部分就不要了。
                 x1a, y1a, x2a, y2a = max(xc - w, 0), max(yc - h, 0), xc, yc  # xmin, ymin, xmax, ymax (large image)
+                #w - (x2a - x1a) 也是针对于越界的情况
                 x1b, y1b, x2b, y2b = w - (x2a - x1a), h - (y2a - y1a), w, h  # xmin, ymin, xmax, ymax (small image)
             elif i == 1:  # top right
                 x1a, y1a, x2a, y2a = xc, max(yc - h, 0), min(xc + w, s * 2), yc
@@ -772,20 +788,23 @@ class LoadImagesAndLabels(Dataset):
             elif i == 3:  # bottom right
                 x1a, y1a, x2a, y2a = xc, yc, min(xc + w, s * 2), min(s * 2, yc + h)
                 x1b, y1b, x2b, y2b = 0, 0, min(w, x2a - x1a), min(y2a - y1a, h)
-
+            #img是原图，img4是大图
             img4[y1a:y2a, x1a:x2a] = img[y1b:y2b, x1b:x2b]  # img4[ymin:ymax, xmin:xmax]
+            #剪切后的图贴到大图后，会有留白，求出padw padh，标签的位置需要加上这些留白，预测的框的真实位置也是需要加上这些留白。
             padw = x1a - x1b
             padh = y1a - y1b
 
             # Labels
             labels, segments = self.labels[index].copy(), self.segments[index].copy()
             if labels.size:
+                #标签的位置需要加上这些留白,重新计算lable,
                 labels[:, 1:] = xywhn2xyxy(labels[:, 1:], w, h, padw, padh)  # normalized xywh to pixel xyxy format
                 segments = [xyn2xy(x, w, h, padw, padh) for x in segments]
             labels4.append(labels)
             segments4.extend(segments)
 
         # Concat/clip labels
+        #当lable的框还原后加上留白后，越界了，那么越界部分就不要了
         labels4 = np.concatenate(labels4, 0)
         for x in (labels4[:, 1:], *segments4):
             np.clip(x, 0, 2 * s, out=x)  # clip when using random_perspective()

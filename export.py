@@ -634,7 +634,7 @@ def parse_opt(known=False):
     parser.add_argument('--data', type=str, default=ROOT / 'data/coco128.yaml', help='dataset.yaml path')
     parser.add_argument('--weights', nargs='+', type=str, default=ROOT / 'yolov5s.pt', help='model.pt path(s)')
     parser.add_argument('--imgsz', '--img', '--img-size', nargs='+', type=int, default=[640, 640], help='image (h, w)')
-    parser.add_argument('--batch-size', type=int, default=1, help='batch size')
+    parser.add_argument('--batch-size', type=int, default=10, help='batch size')
     parser.add_argument('--device', default='cpu', help='cuda device, i.e. 0 or 0,1,2,3 or cpu')
     parser.add_argument('--half', action='store_true', help='FP16 half-precision export')
     parser.add_argument('--inplace', action='store_true', help='set YOLOv5 Detect() inplace=True')
@@ -643,7 +643,7 @@ def parse_opt(known=False):
     parser.add_argument('--int8', action='store_true', help='CoreML/TF INT8 quantization')
     parser.add_argument('--dynamic', action='store_true', help='ONNX/TF/TensorRT: dynamic axes')
     parser.add_argument('--simplify', action='store_true', help='ONNX: simplify model')
-    parser.add_argument('--opset', type=int, default=17, help='ONNX: opset version')
+    parser.add_argument('--opset', type=int, default=11, help='ONNX: opset version')
     parser.add_argument('--verbose', action='store_true', help='TensorRT: verbose log')
     parser.add_argument('--workspace', type=int, default=4, help='TensorRT: workspace size (GB)')
     parser.add_argument('--nms', action='store_true', help='TF: add NMS to model')
@@ -655,7 +655,7 @@ def parse_opt(known=False):
     parser.add_argument(
         '--include',
         nargs='+',
-        default=['torchscript'],
+        default=['onnx'],
         help='torchscript, onnx, openvino, engine, coreml, saved_model, pb, tflite, edgetpu, tfjs, paddle')
     opt = parser.parse_known_args()[0] if known else parser.parse_args()
     print_args(vars(opt))

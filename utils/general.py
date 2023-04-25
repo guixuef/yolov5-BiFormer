@@ -773,6 +773,7 @@ def xywh2xyxy(x):
 
 
 def xywhn2xyxy(x, w=640, h=640, padw=0, padh=0):
+    #lable是原图等比缩小到一个格子，所以想知道实际的位置需要放大
     # Convert nx4 boxes from [x, y, w, h] normalized to [x1, y1, x2, y2] where xy1=top-left, xy2=bottom-right
     y = x.clone() if isinstance(x, torch.Tensor) else np.copy(x)
     y[..., 0] = w * (x[..., 0] - x[..., 2] / 2) + padw  # top left x
