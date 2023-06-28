@@ -21,6 +21,7 @@ if str(ROOT) not in sys.path:
 if platform.system() != 'Windows':
     ROOT = Path(os.path.relpath(ROOT, Path.cwd()))  # relative
 
+from models.Biformer import BiLevelRoutingAttention,Attention,AttentionLePE
 from models.common import *
 from models.experimental import *
 from utils.autoanchor import check_anchor_order
@@ -330,6 +331,9 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
         # TODO: channel, gw, gd
+        elif m in{BiLevelRoutingAttention,Attention,AttentionLePE}:
+            c2 = ch[f]
+            args = [c2,*args]
         elif m in {Detect, Segment}:
             args.append([ch[x] for x in f])
             if isinstance(args[1], int):  # number of anchors
