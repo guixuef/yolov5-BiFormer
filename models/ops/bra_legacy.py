@@ -100,10 +100,7 @@ class QKVLinear(nn.Module):
         self.qkv = nn.Linear(dim, qk_dim + qk_dim + dim, bias=bias)
     
     def forward(self, x):
-        print(x.shape,self.qk_dim,self.dim)
-        print(x.shape,self.qk_dim,self.qk_dim+self.dim)
         q, kv = self.qkv(x).split([self.qk_dim, self.qk_dim+self.dim], dim=-1)
-        print(q.shape,kv.shape)
         return q, kv
         # q, k, v = self.qkv(x).split([self.qk_dim, self.qk_dim, self.dim], dim=-1)
         # return q, k, v
@@ -118,10 +115,10 @@ class BiLevelRoutingAttention(nn.Module):
     diff_routing: wether to set routing differentiable
     soft_routing: wether to multiply soft routing weights 
     """
-    def __init__(self, dim, n_win=7, num_heads=8, qk_dim=None, qk_scale=None,
+    def __init__(self, dim, num_heads=8, n_win=7, qk_dim=None, qk_scale=None,
                  kv_per_win=4, kv_downsample_ratio=4, kv_downsample_kernel=None, kv_downsample_mode='identity',
                  topk=4, param_attention="qkvo", param_routing=False, diff_routing=False, soft_routing=False, side_dwconv=3,
-                 auto_pad=True):
+                 auto_pad=False):
         super().__init__()
         # local attention setting
         self.dim = dim
@@ -210,7 +207,6 @@ class BiLevelRoutingAttention(nn.Module):
         Return:
             NHWC tensor
         """
-        x = rearrange(x, "n c h w -> n h w c")
          # NOTE: use padding for semantic segmentation
         ###################################################
         if self.auto_pad:
@@ -230,9 +226,8 @@ class BiLevelRoutingAttention(nn.Module):
 
 
         # patchify, (n, p^2, w, w, c), keep 2d window as we need 2d pooling to reduce kv size
-        print(x.shape,self.n_win)
         x = rearrange(x, "n (j h) (i w) c -> n (j i) h w c", j=self.n_win, i=self.n_win)
-        print(x.shape,self.n_win)
+
         #################qkv projection###################
         # q: (n, p^2, w, w, c_qk)
         # kv: (n, p^2, w, w, c_qk+c_v)
@@ -286,97 +281,4 @@ class BiLevelRoutingAttention(nn.Module):
         if ret_attn_mask:
             return out, r_weight, r_idx, attn_weight
         else:
-            return rearrange(out, "n h w c -> n c h w")
-
-class Attention(nn.Module):
-    """
-    vanilla attention
-    """
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0.):
-        super().__init__()
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-        # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
-        self.scale = qk_scale or head_dim ** -0.5
-
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-
-    def forward(self, x):
-        """
-        args:
-            x: NCHW tensor
-        return:
-            NCHW tensor
-        """
-        _, _, H, W = x.size()
-        x = rearrange(x, 'n c h w -> n (h w) c')
-        
-        #######################################
-        B, N, C = x.shape        
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
-
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        #######################################
-
-        x = rearrange(x, 'n (h w) c -> n c h w', h=H, w=W)
-        return x
-
-class AttentionLePE(nn.Module):
-    """
-    vanilla attention
-    """
-    def __init__(self, dim, num_heads=8, qkv_bias=False, qk_scale=None, attn_drop=0., proj_drop=0., side_dwconv=5):
-        super().__init__()
-        self.num_heads = num_heads
-        head_dim = dim // num_heads
-        # NOTE scale factor was wrong in my original version, can set manually to be compat with prev weights
-        self.scale = qk_scale or head_dim ** -0.5
-
-        self.qkv = nn.Linear(dim, dim * 3, bias=qkv_bias)
-        self.attn_drop = nn.Dropout(attn_drop)
-        self.proj = nn.Linear(dim, dim)
-        self.proj_drop = nn.Dropout(proj_drop)
-        self.lepe = nn.Conv2d(dim, dim, kernel_size=side_dwconv, stride=1, padding=side_dwconv//2, groups=dim) if side_dwconv > 0 else \
-                    lambda x: torch.zeros_like(x)
-
-    def forward(self, x):
-        """
-        args:
-            x: NCHW tensor
-        return:
-            NCHW tensor
-        """
-        _, _, H, W = x.size()
-        x = rearrange(x, 'n c h w -> n (h w) c')
-        
-        #######################################
-        B, N, C = x.shape        
-        qkv = self.qkv(x).reshape(B, N, 3, self.num_heads, C // self.num_heads).permute(2, 0, 3, 1, 4)
-        q, k, v = qkv[0], qkv[1], qkv[2]   # make torchscript happy (cannot use tensor as tuple)
-
-        lepe = self.lepe(rearrange(x, 'n (h w) c -> n c h w', h=H, w=W))
-        lepe = rearrange(lepe, 'n c h w -> n (h w) c')
-
-        attn = (q @ k.transpose(-2, -1)) * self.scale
-        attn = attn.softmax(dim=-1)
-        attn = self.attn_drop(attn)
-
-        x = (attn @ v).transpose(1, 2).reshape(B, N, C)
-        x = x + lepe
-
-        x = self.proj(x)
-        x = self.proj_drop(x)
-        #######################################
-
-        x = rearrange(x, 'n (h w) c -> n c h w', h=H, w=W)
-        return x
+            return out

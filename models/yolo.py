@@ -14,6 +14,8 @@ import sys
 from copy import deepcopy
 from pathlib import Path
 
+from models.ops.bra_nchw import nchwBRA
+
 FILE = Path(__file__).resolve()
 ROOT = FILE.parents[1]  # YOLOv5 root directory
 if str(ROOT) not in sys.path:
@@ -331,7 +333,7 @@ def parse_model(d, ch):  # model_dict, input_channels(3)
         elif m is Concat:
             c2 = sum(ch[x] for x in f)
         # TODO: channel, gw, gd
-        elif m in{BiLevelRoutingAttention,Attention,AttentionLePE}:
+        elif m in {nchwBRA}:
             c2 = ch[f]
             args = [c2,*args]
         elif m in {Detect, Segment}:
